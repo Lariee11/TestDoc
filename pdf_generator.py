@@ -10,6 +10,7 @@ from datetime import datetime
 from xml.sax.saxutils import escape
 
 from PIL import Image as PILImage
+from PIL import ImageOps
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
 from reportlab.lib.pagesizes import A4
@@ -21,6 +22,7 @@ from reportlab.pdfgen import canvas
 from reportlab.platypus import (
     CondPageBreak,
     HRFlowable,
+    Flowable,
     Image,
     Indenter,
     KeepTogether,
@@ -35,10 +37,13 @@ from reportlab.platypus import (
 # --------------------------------------------------------------------------
 # Paleta do modelo
 # --------------------------------------------------------------------------
-AZUL_TITULO = colors.HexColor("#1f3864")
-AZUL_TABELA = colors.HexColor("#1f4e79")
-AZUL_CLARO = colors.HexColor("#dce6f1")
-AZUL_CAPA = colors.HexColor("#e7ecf7")
+AZUL_TITULO = colors.HexColor("#16335c")
+AZUL_TABELA = colors.HexColor("#1b3a66")
+AZUL_CLARO = colors.HexColor("#dfe9f6")
+AZUL_BARRA = colors.HexColor("#1d63b3")
+FUNDO_CARTAO = colors.HexColor("#eef0f3")
+FUNDO_LOG = colors.HexColor("#f6f8fb")
+BORDA = colors.HexColor("#d5dbe5")
 PRETO = colors.black
 CINZA = colors.HexColor("#666666")
 
@@ -60,8 +65,8 @@ MAX_LADO_IMAGEM = 2200  # px
 
 PAGINA_L, PAGINA_A = A4
 MARGEM_X = 54
-MARGEM_TOPO = 92
-MARGEM_BASE = 62
+MARGEM_TOPO = 100
+MARGEM_BASE = 66
 
 # --------------------------------------------------------------------------
 # Fontes: Arial/Liberation/DejaVu quando disponíveis (Unicode), senão padrão PDF
@@ -183,19 +188,55 @@ def _decodificar_imagem(data_url):
     return buf, img.size[0], img.size[1]
 
 
+class Cartao(Flowable):
+    """Cartão de cantos arredondados com sombra suave; ocupa toda a largura disponível."""
+
+    def __init__(self, conteudo, fundo=colors.white, barra=None, pad=10, raio=8, borda=BORDA):
+        super().__init__()
+        self.conteudo, self.fundo, self.barra = conteudo, fundo, barra
+        self.pad, self.raio, self.borda = pad, raio, borda
+        self._folga = 5 if barra else 0
+
+    def wrap(self, larg_disp, alt_disp):
+        self.width = larg_disp
+        interno = larg_disp - 2 * self.pad - self._folga
+        self._cw, self._ch = self.conteudo.wrap(interno, max(alt_disp - 2 * self.pad - 3, 1))
+        self.height = self._ch + 2 * self.pad + 3  # 3 pt reservados para a sombra
+        return self.width, self.height
+
+    def draw(self):
+        c = self.canv
+        w, h, r = self.width, self.height - 3, self.raio
+        c.saveState()
+        for desloc, alfa in ((3, 0.04), (2, 0.06), (1, 0.08)):  # sombra
+            c.setFillColor(colors.black, alpha=alfa)
+            c.roundRect(0.5, 3 - desloc, w - 1, h, r, stroke=0, fill=1)
+        c.setFillColor(self.fundo, alpha=1)
+        c.setStrokeColor(self.borda)
+        c.setLineWidth(0.6)
+        c.roundRect(0, 3, w, h, r, stroke=1, fill=1)
+        if self.barra:
+            recorte = c.beginPath()
+            recorte.roundRect(0, 3, w, h, r)
+            c.clipPath(recorte, stroke=0, fill=0)
+            c.setFillColor(self.barra)
+            c.rect(0, 3, 5, h, stroke=0, fill=1)
+        c.restoreState()
+        x = self.pad + self._folga + (w - 2 * self.pad - self._folga - self._cw) / 2
+        self.conteudo.drawOn(c, x, 3 + self.pad)
+
+
 def _figura(dados, larg_max, alt_max):
     buf, w, h = dados
     escala = min(larg_max / w, alt_max / h)
-    img = Image(buf, width=w * escala, height=h * escala)
-    img.hAlign = "CENTER"
-    return img
+    return Cartao(Image(buf, width=w * escala, height=h * escala))
 
 
 # --------------------------------------------------------------------------
 # Tabelas
 # --------------------------------------------------------------------------
 def _tabela(dados, larguras, grade=True, extra=()):
-    """Tabela com cabeçalho azul e linhas alternadas, como no modelo."""
+    """Tabela sem grade, com cabeçalho azul-marinho e linhas alternadas."""
     t = Table(dados, colWidths=larguras, repeatRows=1)
     estilo = [
         ("BACKGROUND", (0, 0), (-1, 0), AZUL_TABELA),
@@ -206,8 +247,10 @@ def _tabela(dados, larguras, grade=True, extra=()):
         ("LEFTPADDING", (0, 0), (-1, -1), 6),
         ("RIGHTPADDING", (0, 0), (-1, -1), 6),
     ]
+    estilo += [("LINEBELOW", (0, -1), (-1, -1), 0.8, AZUL_TABELA), ("TOPPADDING", (0, 0), (-1, 0), 5),
+               ("BOTTOMPADDING", (0, 0), (-1, 0), 5)]
     if grade:
-        estilo += [("BOX", (0, 0), (-1, -1), 0.6, PRETO), ("INNERGRID", (0, 0), (-1, -1), 0.5, PRETO)]
+        estilo.append(("LINEAFTER", (0, 1), (-2, -1), 0.4, colors.white))
     estilo.extend(extra)
     t.setStyle(TableStyle(estilo))
     return t
@@ -216,7 +259,7 @@ def _tabela(dados, larguras, grade=True, extra=()):
 def _bloco_log(nome_rele, conteudo, largura):
     tam = 7.6
     larg_char = pdfmetrics.stringWidth("M", FONT_MONO, tam)
-    max_cols = max(20, int(largura / larg_char))
+    max_cols = max(20, int((largura - 13) / larg_char))
 
     saida = []
     for linha in _limpo(conteudo).strip("\n").split("\n"):
@@ -235,15 +278,21 @@ def _bloco_log(nome_rele, conteudo, largura):
             [
                 ("FONTNAME", (0, 0), (-1, 0), FONT_MONO_B),
                 ("FONTSIZE", (0, 0), (-1, 0), 8.5),
-                ("BOTTOMPADDING", (0, 0), (-1, 0), 3),
-                ("TOPPADDING", (0, 0), (-1, 0), 0),
+                ("TEXTCOLOR", (0, 0), (-1, 0), AZUL_TITULO),
+                ("BACKGROUND", (0, 0), (-1, 0), AZUL_CLARO),
+                ("LINEBEFORE", (0, 0), (0, -1), 2.5, AZUL_BARRA),
+                ("BACKGROUND", (0, 1), (-1, -1), FUNDO_LOG),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 4),
+                ("TOPPADDING", (0, 0), (-1, 0), 4),
+                ("TOPPADDING", (0, 1), (-1, 1), 4),
+                ("BOTTOMPADDING", (0, -1), (-1, -1), 5),
                 ("FONTNAME", (0, 1), (-1, -1), FONT_MONO),
                 ("FONTSIZE", (0, 1), (-1, -1), tam),
                 ("LEADING", (0, 1), (-1, -1), tam + 2),
                 ("TOPPADDING", (0, 1), (-1, -1), 0.2),
                 ("BOTTOMPADDING", (0, 1), (-1, -1), 0.2),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("LEFTPADDING", (0, 0), (-1, -1), 9),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
             ]
         )
     )
@@ -295,18 +344,30 @@ def _formatar_data(valor) -> str:
 # --------------------------------------------------------------------------
 # Canvas: cabeçalho e rodapé em todas as páginas
 # --------------------------------------------------------------------------
-def _logo_fixa(caminho):
-    """Logo do cabeçalho -> (ImageReader, largura_px, altura_px) ou None se o arquivo faltar."""
+def _logo_fixa(caminho, tom=None):
+    """Logo do cabeçalho -> (ImageReader, largura_px, altura_px) ou None se o arquivo faltar.
+
+    Com `tom=(escuro, claro)`, a imagem é recolorida nesses dois tons (mantém a transparência).
+    """
     try:
         with PILImage.open(caminho) as img:
-            largura, altura = img.size
-        return ImageReader(caminho), largura, altura
+            img = img.convert("RGBA")
     except OSError:
         return None
+    if tom:
+        alfa = img.getchannel("A")
+        cinza = ImageOps.autocontrast(img.convert("L"), mask=alfa.point(lambda a: 255 if a > 128 else 0))
+        img = ImageOps.colorize(cinza, black=tom[0], white=tom[1]).convert("RGBA")
+        img.putalpha(alfa)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return ImageReader(buf), img.size[0], img.size[1]
 
 
 def _canvas_modelo(rodape):
-    leitores = {k: v for k, v in (("esq", _logo_fixa(LOGO_ESQUERDA)), ("dir", _logo_fixa(LOGO_DIREITA))) if v}
+    logos = (("esq", _logo_fixa(LOGO_ESQUERDA)), ("dir", _logo_fixa(LOGO_DIREITA, tom=("#2f4f8a", "#7f9bcb"))))
+    leitores = {k: v for k, v in logos if v}
     linhas = CABECALHO_LINHAS
 
     class CanvasModelo(canvas.Canvas):
@@ -335,21 +396,63 @@ def _canvas_modelo(rodape):
             self.drawImage(leitor, x - lw if direita else x, centro - lh / 2, lw, lh, mask="auto")
             return lw
 
+        def _quadro(self):
+            """Moldura azul-marinho com cantos chanfrados e triângulos nos quatro cantos."""
+            m, ch, tri = 15, 15, 17  # afastamento da borda, chanfro e cateto do triângulo
+            x0, y0, x1, y1 = m, m, PAGINA_L - m, PAGINA_A - m
+            self.setStrokeColor(AZUL_TITULO)
+            self.setLineWidth(1.6)
+            self.setLineJoin(1)
+            p = self.beginPath()
+            p.moveTo(x0 + ch, y0)
+            for x, y in ((x1 - ch, y0), (x1, y0 + ch), (x1, y1 - ch), (x1 - ch, y1),
+                         (x0 + ch, y1), (x0, y1 - ch), (x0, y0 + ch)):
+                p.lineTo(x, y)
+            p.close()
+            self.drawPath(p, stroke=1, fill=0)
+            self.setFillColor(AZUL_TITULO)
+            b = 6  # afastamento dos triângulos em relação à borda do papel
+            for cx, cy, sx, sy in ((b, b, 1, 1), (PAGINA_L - b, b, -1, 1),
+                                   (b, PAGINA_A - b, 1, -1), (PAGINA_L - b, PAGINA_A - b, -1, -1)):
+                t = self.beginPath()
+                t.moveTo(cx, cy)
+                t.lineTo(cx + sx * tri, cy)
+                t.lineTo(cx, cy + sy * tri)
+                t.close()
+                self.drawPath(t, stroke=0, fill=1)
+
         def _moldura(self):
             self.saveState()
-            self._logo("esq", MARGEM_X, 120, 44)
+            self._quadro()
+            self._logo("esq", MARGEM_X, 120, 42)
             ocupado = self._logo("dir", PAGINA_L - MARGEM_X, 46, 46, direita=True)
             x_txt = PAGINA_L - MARGEM_X - (ocupado + 10 if ocupado else 0)
-            self.setFillColor(PRETO)
+            self.setFillColor(AZUL_TITULO)
             self.setFont(FONT, 9.5)
             y = PAGINA_A - 56 + (len(linhas) - 1) * 6.5 - 3
             for linha in linhas:
                 self.drawRightString(x_txt, y, linha)
                 y -= 13
+            # fio sob o cabeçalho
+            self.setStrokeColor(BORDA)
+            self.setLineWidth(0.8)
+            self.line(MARGEM_X, PAGINA_A - 88, PAGINA_L - MARGEM_X, PAGINA_A - 88)
+            # rodapé: fio duplo, título à esquerda e número da página à direita
+            self.setStrokeColor(AZUL_TITULO)
+            self.setLineWidth(1)
+            self.line(MARGEM_X - 8, 54, PAGINA_L - MARGEM_X + 8, 54)
             self.setFont(FONT, 8.5)
-            self.drawRightString(PAGINA_L - MARGEM_X, 50, str(self._pageNumber))
+            self.setFillColor(AZUL_TITULO)
+            numero = str(self._pageNumber)
+            self.drawRightString(PAGINA_L - MARGEM_X, 40, numero)
+            x_fim = PAGINA_L - MARGEM_X - pdfmetrics.stringWidth(numero, FONT, 8.5) - 8
+            x_ini = MARGEM_X
             if rodape:
-                self.drawString(MARGEM_X, 38, rodape)
+                self.drawString(MARGEM_X, 40, rodape)
+                x_ini += pdfmetrics.stringWidth(rodape, FONT, 8.5) + 8
+            if x_fim > x_ini:
+                self.setLineWidth(0.5)
+                self.line(x_ini, 43, x_fim, 43)
             self.restoreState()
 
     return CanvasModelo
@@ -377,12 +480,12 @@ def gerar_pdf(dados: dict) -> bytes:
         title=f"{documento} — {titulo}" if titulo else documento,
         author=_limpo(capa.get("responsavel")).strip() or "TestDoc",
     )
-    L = doc.width
+    L = doc.width - 12  # desconta o recuo interno (6 pt de cada lado) do quadro de texto
     el = []
 
     # ---------------- Capa ----------------
     el.append(Paragraph(escape(documento), S_DOC))
-    el.append(HRFlowable(width="100%", thickness=1.2, color=PRETO, spaceBefore=2, spaceAfter=8))
+    el.append(HRFlowable(width="100%", thickness=1.4, color=AZUL_TITULO, spaceBefore=3, spaceAfter=9))
     info = Table(
         [
             [P("Título:", S_ROTULO), P(titulo, S_TEXTO)],
@@ -392,22 +495,19 @@ def gerar_pdf(dados: dict) -> bytes:
             [P("Responsável Técnico", S_ROTULO), P(capa.get("responsavel"), S_TEXTO)],
             [P("Revisão:", S_ROTULO), P(capa.get("revisao"), S_TEXTO)],
         ],
-        colWidths=[122, L - 122],
+        colWidths=[122, L - 122 - 25],
     )
     info.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, -1), AZUL_CAPA),
-                ("BOX", (0, 0), (-1, -1), 0.6, PRETO),
-                ("LINEBEFORE", (0, 0), (0, -1), 3.5, PRETO),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("TOPPADDING", (0, 0), (-1, -1), 2.5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
-                ("LEFTPADDING", (0, 0), (-1, -1), 7),
+                ("TOPPADDING", (0, 0), (-1, -1), 1.8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.8),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
             ]
         )
     )
-    el.append(info)
+    el.append(Cartao(info, fundo=FUNDO_CARTAO, barra=AZUL_BARRA, pad=8))
 
     # ---------------- 1. Diagrama unifilar ----------------
     img = _decodificar_imagem(dados.get("diagrama"))
@@ -435,7 +535,7 @@ def gerar_pdf(dados: dict) -> bytes:
     topo = _decodificar_imagem(met.get("topologia"))
     cab_32 = [Paragraph("3.2. Topologia e Equipamentos", S_SUBSECAO)]
     if topo:
-        cab_32 += [Spacer(1, 4), _figura(topo, L, 250)]
+        cab_32 += [Spacer(1, 4), _figura(topo, L - 24, 250)]
     el.append(KeepTogether(cab_32))
     if equipamentos:
         linhas = [[P("Equipamento", S_TH), P("Aplicação", S_TH)]]
@@ -485,9 +585,11 @@ def gerar_pdf(dados: dict) -> bytes:
             TableStyle(
                 [
                     ("BACKGROUND", (0, 0), (-1, -1), AZUL_TABELA),
-                    ("TOPPADDING", (0, 0), (-1, -1), 1.5),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 3),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                    ("LINEBEFORE", (0, 0), (0, -1), 4, AZUL_BARRA),
+                    ("ROUNDEDCORNERS", [5, 5, 5, 5]),
                 ]
             )
         )
@@ -552,8 +654,6 @@ def gerar_pdf(dados: dict) -> bytes:
                 Paragraph("6.&nbsp;&nbsp;Controle de Revisões", S_SECAO),
                 _tabela(linhas, [L * 0.14, L * 0.54, L * 0.32], grade=False,
                         extra=[("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white]),
-                               ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#9aa7b8")),
-                               ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#9aa7b8")),
                                ("TOPPADDING", (0, 0), (-1, -1), 7), ("BOTTOMPADDING", (0, 0), (-1, -1), 7)]),
             ]
         )
