@@ -1,0 +1,36 @@
+﻿Plano de Testes — SE Areal - Anti-ilhamento
+Teste T1
+Condição simulada: Colocar o 52-1 (Entrada de Linha) no Grupo 1 e simular o TRIP.
+Resultado esperado: Deve dar TRIP normalmente, pois a proteção não está transferida.
+Status: Concluído
+Exportado em 11/11/2026 09:24
+
+==============================================================================
+SER — 52-1 • SEL-751 (10.82.125.112)
+==============================================================================
+DJ 52-1                                  Date: 20/12/2026   Time: 22:48:08.013
+EQTL-RS SE ARE                           Time Source: External
+
+Serial No = 3231035535      FID = SEL-751-R400-V0-Z100100-D20230315
+CID = 1969
+
+#      DATE         TIME                ELEMENT                STATE
+17  20/12/2026  22:47:37.071   RB07                       Asserted
+16  20/12/2026  22:47:37.075   RB07                       Deasserted
+15  20/12/2026  22:47:40.145   Relay Settings Changed
+14  20/12/2026  22:47:40.490   Relay Group Changed
+13  20/12/2026  22:47:40.523   DISJUNTOR                  ABERTO
+12  20/12/2026  22:47:40.527   DISJUNTOR                  FECHADO
+11  20/12/2026  22:47:40.527   SH1                        Asserted
+10  20/12/2026  22:47:40.527   SH0                        Deasserted
+9   20/12/2026  22:48:02.760   TRIP                       Asserted
+8   20/12/2026  22:48:02.760   OUT303                     Asserted
+7   20/12/2026  22:48:02.761   OUT101                     Asserted
+6   20/12/2026  22:48:02.764   SV10T                      Asserted
+5   20/12/2026  22:48:02.768   DISJUNTOR                  ABERTO
+4   20/12/2026  22:48:03.760   TRIP                       Deasserted
+3   20/12/2026  22:48:03.760   OUT303                     Deasserted
+2   20/12/2026  22:48:03.761   OUT101                     Deasserted
+1   20/12/2026  22:48:04.764   SV10T                      Deasserted
+
+=>

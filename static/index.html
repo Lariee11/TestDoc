@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TestDoc — Certificado de Ensaio de Proteção</title>
+  <link rel="icon" type="image/png" href="logo.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="bg" aria-hidden="true">
+    <span class="orb orb-a"></span><span class="orb orb-b"></span><span class="orb orb-c"></span>
+    <span class="grid"></span>
+  </div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo-tile"><img src="logo.png" alt="Logo TestDoc"></div>
+      <div class="brand-text">
+        <h1>TestDoc</h1>
+        <p>Gerador de Certificado de Ensaio de Proteção</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <div class="progress" title="Preenchimento do formulário">
+        <svg viewBox="0 0 36 36"><circle class="track" cx="18" cy="18" r="15.5"/><circle id="ring" class="ring" cx="18" cy="18" r="15.5"/></svg>
+        <span id="ringLabel">0%</span>
+      </div>
+      <button type="button" class="btn btn-ghost" id="btnLimpar">Limpar</button>
+      <button type="button" class="btn btn-primary" id="btnGerar">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>
+        <span>Gerar PDF</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="steps" aria-label="Seções do documento">
+      <a href="#sec1" class="step active"><i>1</i><span>Informações Gerais</span></a>
+      <a href="#sec2" class="step"><i>2</i><span>Informações da Subestação</span></a>
+      <a href="#sec3" class="step"><i>3</i><span>Condições de Teste e Resultados</span></a>
+      <a href="#sec4" class="step"><i>4</i><span>Validação e Aprovação Técnica</span></a>
+      <div class="steps-hint">
+        <strong>Dica</strong>
+        Importe o arquivo <code>.txt</code> do SER em um teste: os relés são separados automaticamente e a condição simulada é preenchida.
+      </div>
+    </nav>
+
+    <main>
+      <form id="form" novalidate autocomplete="off">
+
+        <!-- 1 -->
+        <section class="card reveal" id="sec1">
+          <div class="card-head"><b>1</b><div><h2>Informações Gerais</h2><p>Identificação da certificação e resultado global dos ensaios.</p></div></div>
+          <div class="fields cols-2">
+            <label class="field"><span>Nome da SE</span>
+              <input type="text" name="nome_se" placeholder="Ex.: SE Areal" data-req></label>
+            <label class="field"><span>Data de Emissão da Certificação</span>
+              <input type="date" name="data_emissao" data-req></label>
+            <label class="field"><span>Norma de Referência</span>
+              <input type="text" name="norma" placeholder="Ex.: IEC 60255 / IEEE C37.90" data-req></label>
+            <label class="field"><span>Modelos de Relés Utilizados</span>
+              <input type="text" name="reles" placeholder="Ex.: SEL-751, SEL-787" data-req></label>
+            <label class="field span-2"><span>Equipamentos Simulados</span>
+              <textarea name="equipamentos" rows="3" placeholder="Ex.: Disjuntores 52-1, 52-2, 52-3 e 52-9; Transformador TR-1" data-req></textarea></label>
+          </div>
+          <div class="field">
+            <span>Resultado dos Testes</span>
+            <div class="chips" role="radiogroup" aria-label="Resultado dos Testes">
+              <label class="chip ok"><input type="radio" name="resultado" value="aprovado" checked><i></i>Aprovado</label>
+              <label class="chip warn"><input type="radio" name="resultado" value="ressalvas"><i></i>Aprovado com Ressalvas</label>
+              <label class="chip bad"><input type="radio" name="resultado" value="reprovado"><i></i>Não Aprovado</label>
+              <label class="chip off"><input type="radio" name="resultado" value="nao_realizado"><i></i>Testes Não Realizados</label>
+            </div>
+          </div>
+        </section>
+
+        <!-- 2 -->
+        <section class="card reveal" id="sec2">
+          <div class="card-head"><b>2</b><div><h2>Informações da Subestação</h2><p>Diagrama da subestação e parâmetros do sistema.</p></div></div>
+          <div class="split">
+            <div class="drop" id="dropSE" data-label="Diagrama da subestação" data-hint="PNG ou JPG — arraste ou clique"></div>
+            <div class="fields">
+              <label class="field"><span>Tensão de Alta</span>
+                <input type="text" name="tensao_alta" placeholder="Ex.: 69 kV" data-req></label>
+              <label class="field"><span>Tensão de Baixa</span>
+                <input type="text" name="tensao_baixa" placeholder="Ex.: 23 kV" data-req></label>
+              <label class="field"><span>Mala de Testes Utilizada</span>
+                <input type="text" name="mala" placeholder="Ex.: OMICRON CMC 356" data-req></label>
+            </div>
+          </div>
+        </section>
+
+        <!-- 3 -->
+        <section class="card reveal" id="sec3">
+          <div class="card-head"><b>3</b><div><h2>Condições de Teste e Resultados</h2><p>Cada teste gera uma subseção própria no documento.</p></div>
+            <span class="counter" id="contador">0 testes</span></div>
+          <div id="testes"></div>
+          <button type="button" class="btn btn-add" id="btnAddTeste">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Adicionar teste
+          </button>
+        </section>
+
+        <!-- 4 -->
+        <section class="card reveal" id="sec4">
+          <div class="card-head"><b>4</b><div><h2>Registro de Validação e Aprovação Técnica</h2><p>Responsáveis pela execução e pela liberação.</p></div></div>
+          <div class="sign-grid">
+            <div class="sign">
+              <h3>Execução dos Ensaios</h3>
+              <label class="field"><span>Responsável</span><input type="text" name="exec_nome" placeholder="Nome completo" data-req></label>
+              <label class="field"><span>Matrícula</span><input type="text" name="exec_matricula" placeholder="Ex.: MAT-202488" data-req></label>
+              <label class="field"><span>Área de Atuação</span><input type="text" name="exec_area" placeholder="Ex.: Comissionamento / Proteção" data-req></label>
+            </div>
+            <div class="sign">
+              <h3>Aprovação e Liberação</h3>
+              <label class="field"><span>Aprovador</span><input type="text" name="aprov_nome" placeholder="Nome completo" data-req></label>
+              <label class="field"><span>Matrícula</span><input type="text" name="aprov_matricula" placeholder="Ex.: MAT-109432" data-req></label>
+              <label class="field"><span>Área de Atuação</span><input type="text" name="aprov_area" placeholder="Ex.: Engenharia / Operação SE" data-req></label>
+            </div>
+          </div>
+        </section>
+
+        <div class="cta reveal">
+          <div><h2>Tudo pronto?</h2><p>O certificado é montado no servidor Python e aberto para conferência antes do download.</p></div>
+          <button type="button" class="btn btn-primary btn-lg" id="btnGerar2">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14"/></svg>
+            <span>Gerar certificado em PDF</span>
+          </button>
+        </div>
+      </form>
+    </main>
+  </div>
+
+  <!-- Modelo: teste -->
+  <template id="tplTeste">
+    <article class="test">
+      <header class="test-head">
+        <span class="test-num"></span>
+        <input type="text" class="test-id" placeholder="Identificação do teste (ex.: T1)" aria-label="Identificação do teste">
+        <span class="seal-pill"></span>
+        <button type="button" class="icon-btn toggle" title="Recolher / expandir" aria-label="Recolher ou expandir">
+          <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+        <button type="button" class="icon-btn danger remove" title="Remover teste" aria-label="Remover teste">
+          <svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
+      </header>
+      <div class="test-body">
+        <div class="fields cols-2">
+          <label class="field"><span>Condição Simulada</span>
+            <textarea class="t-cond" rows="3" placeholder="Descreva a condição simulada no ensaio"></textarea></label>
+          <label class="field"><span>Resultado</span>
+            <textarea class="t-res" rows="3" placeholder="Descreva o resultado do ensaio"></textarea></label>
+        </div>
+        <div class="field">
+          <span>Selo de Aprovação</span>
+          <div class="chips small" role="radiogroup" aria-label="Selo de Aprovação">
+            <label class="chip ok"><input type="radio" value="aprovado" checked><i></i>Aprovado</label>
+            <label class="chip warn"><input type="radio" value="ressalvas"><i></i>Aprovado com Ressalvas</label>
+            <label class="chip bad"><input type="radio" value="reprovado"><i></i>Não Aprovado</label>
+            <label class="chip off"><input type="radio" value="nao_realizado"><i></i>Não Realizado</label>
+          </div>
+        </div>
+
+        <div class="sub-head">
+          <h4>Log de Eventos dos Relés</h4>
+          <div class="sub-actions">
+            <label class="btn btn-mini">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0-4 4m4-4 4 4M5 20h14"/></svg>Importar .txt
+              <input type="file" class="log-import" accept=".txt,.log,text/plain" multiple hidden>
+            </label>
+            <button type="button" class="btn btn-mini add-log">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Relé manual
+            </button>
+          </div>
+        </div>
+        <div class="logs"></div>
+        <p class="empty-logs">Nenhum log adicionado. Importe o <code>.txt</code> exportado ou adicione um relé manualmente.</p>
+
+        <div class="sub-head"><h4>Diagrama com o estado dos equipamentos</h4></div>
+        <div class="drop wide" data-label="Imagem do diagrama deste teste" data-hint="PNG — arraste ou clique"></div>
+      </div>
+    </article>
+  </template>
+
+  <!-- Modelo: log de relé -->
+  <template id="tplLog">
+    <div class="log">
+      <div class="log-bar">
+        <span class="dots"><i></i><i></i><i></i></span>
+        <input type="text" class="log-rele" placeholder="Relé (ex.: 52-1 • SEL-751)" aria-label="Identificação do relé">
+        <label class="icon-btn" title="Carregar .txt neste relé">
+          <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0-4 4m4-4 4 4M5 20h14"/></svg>
+          <input type="file" class="log-file" accept=".txt,.log,text/plain" hidden>
+        </label>
+        <button type="button" class="icon-btn danger log-remove" title="Remover log" aria-label="Remover log">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </div>
+      <textarea class="log-text" rows="9" spellcheck="false" placeholder="Cole aqui o log de eventos (SER) do relé ou carregue o arquivo .txt"></textarea>
+    </div>
+  </template>
+
+  <!-- Pré-visualização -->
+  <div class="modal" id="modal" hidden>
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="modalTitulo">
+      <div class="modal-head">
+        <h3 id="modalTitulo">Certificado gerado</h3>
+        <div class="modal-actions">
+          <a class="btn btn-primary" id="btnBaixar" download>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14"/></svg><span>Baixar PDF</span></a>
+          <button type="button" class="icon-btn" id="btnFechar" aria-label="Fechar">
+            <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+        </div>
+      </div>
+      <iframe id="preview" title="Pré-visualização do PDF"></iframe>
+    </div>
+  </div>
+
+  <div class="loader" id="loader" hidden>
+    <div class="loader-box"><span class="spinner"></span><p>Montando o certificado…</p></div>
+  </div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
