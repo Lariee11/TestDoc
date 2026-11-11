@@ -19,7 +19,7 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <img src="logo.png" alt="" class="logo">
+      <span class="logo-box"><img src="logo.png" alt="" class="logo"></span>
       <div>
         <h1>TestDoc</h1>
         <p>Certificado de Ensaios de Automação</p>
@@ -46,8 +46,7 @@
 
   <div class="layout">
     <nav class="nav" aria-label="Seções do documento">
-      <a href="#secCab">Cabeçalho</a>
-      <a href="#secCapa">Identificação</a>
+      <a href="#secCapa"><i>·</i>Identificação</a>
       <a href="#sec1"><i>1</i>Diagrama Unifilar</a>
       <a href="#sec2"><i>2</i>Requisitos Funcionais</a>
       <a href="#sec3"><i>3</i>Metodologia</a>
@@ -59,22 +58,18 @@
     <main>
       <form id="form" novalidate autocomplete="off">
 
-        <section id="secCab">
-          <header><h2>Cabeçalho das páginas</h2><p>Logos e texto repetidos no topo de todas as páginas do PDF.</p></header>
-          <div class="grid g-head">
-            <div class="field"><span>Logo esquerda</span><div class="drop small" data-k="cabecalho.logo_esq" data-label="Logo" data-hint="PNG ou JPG"></div></div>
-            <div class="stack">
-              <label class="field"><span>Linha 1</span><input type="text" data-k="cabecalho.linha1" placeholder="Ex.: Gerência Corporativa de Automação"></label>
-              <label class="field"><span>Linha 2</span><input type="text" data-k="cabecalho.linha2" placeholder="Ex.: Executiva Corporativa de Automação AT e RD"></label>
-            </div>
-            <div class="field"><span>Logo direita</span><div class="drop small" data-k="cabecalho.logo_dir" data-label="Logo" data-hint="PNG ou JPG"></div></div>
-          </div>
-        </section>
-
         <section id="secCapa">
+          <div class="doc-head" aria-label="Cabeçalho fixo do documento">
+            <div class="doc-head-top">
+              <img src="logos/logo_esquerda.png" alt="Grupo Equatorial" class="lg-esq">
+              <p>Gerência Corporativa de Automação<br>Executiva Corporativa de Automação AT e RD</p>
+              <img src="logos/logo_direita.png" alt="" class="lg-dir">
+            </div>
+            <strong>Certificado de Ensaios de Automação</strong>
+            <small>Cabeçalho e título fixos do documento</small>
+          </div>
           <header><h2>Identificação</h2><p>Quadro de abertura do certificado.</p></header>
           <div class="grid g-2">
-            <label class="field span"><span>Nome do documento</span><input type="text" data-k="capa.documento" placeholder="Certificado de Ensaios de Automação"></label>
             <label class="field"><span>Título</span><input type="text" data-k="capa.titulo" placeholder="Ex.: Sistema BESS SE Curralinho"></label>
             <label class="field"><span>Subestação</span><input type="text" data-k="capa.subestacao" placeholder="Ex.: SE Curralinho 34,5/13,8 kV"></label>
             <label class="field"><span>Distribuidora</span><input type="text" data-k="capa.distribuidora" placeholder="Ex.: Equatorial Pará"></label>

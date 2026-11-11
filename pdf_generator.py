@@ -49,7 +49,12 @@ STATUS = {
     "nao_realizado": ("Não Realizado", colors.HexColor("#6b7280")),
 }
 
-DOCUMENTO_PADRAO = "Certificado de Ensaios de Automação"
+# Cabeçalho e título fixos do modelo (não editáveis pela interface)
+DOCUMENTO = "Certificado de Ensaios de Automação"
+CABECALHO_LINHAS = ("Gerência Corporativa de Automação", "Executiva Corporativa de Automação AT e RD")
+_ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "logos")
+LOGO_ESQUERDA = os.path.join(_ASSETS, "logo_esquerda.png")
+LOGO_DIREITA = os.path.join(_ASSETS, "logo_direita.png")
 MAX_LINHAS_LOG = 4000
 MAX_LADO_IMAGEM = 2200  # px
 
@@ -290,13 +295,19 @@ def _formatar_data(valor) -> str:
 # --------------------------------------------------------------------------
 # Canvas: cabeçalho e rodapé em todas as páginas
 # --------------------------------------------------------------------------
-def _canvas_modelo(cab, rodape):
-    logo_esq, logo_dir = cab.get("logo_esq"), cab.get("logo_dir")
-    leitores = {}
-    for chave, dados in (("esq", logo_esq), ("dir", logo_dir)):
-        if dados:
-            leitores[chave] = (ImageReader(dados[0]), dados[1], dados[2])
-    linhas = [l for l in (cab.get("linha1"), cab.get("linha2")) if l]
+def _logo_fixa(caminho):
+    """Logo do cabeçalho -> (ImageReader, largura_px, altura_px) ou None se o arquivo faltar."""
+    try:
+        with PILImage.open(caminho) as img:
+            largura, altura = img.size
+        return ImageReader(caminho), largura, altura
+    except OSError:
+        return None
+
+
+def _canvas_modelo(rodape):
+    leitores = {k: v for k, v in (("esq", _logo_fixa(LOGO_ESQUERDA)), ("dir", _logo_fixa(LOGO_DIREITA))) if v}
+    linhas = CABECALHO_LINHAS
 
     class CanvasModelo(canvas.Canvas):
         def __init__(self, *args, **kwargs):
@@ -349,7 +360,6 @@ def _canvas_modelo(cab, rodape):
 # --------------------------------------------------------------------------
 def gerar_pdf(dados: dict) -> bytes:
     """Recebe o dicionário enviado pela interface e devolve o PDF em bytes."""
-    cab = dados.get("cabecalho") or {}
     capa = dados.get("capa") or {}
     met = dados.get("metodologia") or {}
     requisitos = [r for r in (dados.get("requisitos") or []) if (r.get("id") or r.get("texto"))]
@@ -357,7 +367,7 @@ def gerar_pdf(dados: dict) -> bytes:
     testes = dados.get("testes") or []
     revisoes = [r for r in (dados.get("revisoes") or []) if any(str(v).strip() for v in r.values())]
 
-    documento = _limpo(capa.get("documento")).strip() or DOCUMENTO_PADRAO
+    documento = DOCUMENTO
     titulo = _limpo(capa.get("titulo")).strip()
 
     buf = io.BytesIO()
@@ -549,11 +559,5 @@ def gerar_pdf(dados: dict) -> bytes:
         )
     )
 
-    cabecalho = {
-        "linha1": _limpo(cab.get("linha1")).strip(),
-        "linha2": _limpo(cab.get("linha2")).strip(),
-        "logo_esq": _decodificar_imagem(cab.get("logo_esq")),
-        "logo_dir": _decodificar_imagem(cab.get("logo_dir")),
-    }
-    doc.build(el, canvasmaker=_canvas_modelo(cabecalho, titulo))
+    doc.build(el, canvasmaker=_canvas_modelo(titulo))
     return buf.getvalue()

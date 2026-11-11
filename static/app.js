@@ -297,11 +297,10 @@ function preencher(d) {
   }
 }
 
-function estadoInicial(manter = {}) {
+function estadoInicial() {
   const d = new Date();
   const p = (n) => String(n).padStart(2, "0");
   preencher({
-    cabecalho: manter.cabecalho || {},
     capa: { data: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`, revisao: "0" },
     requisitos: [{ id: "RF-1" }],
     metodologia: { equipamentos: [{}] },
@@ -427,8 +426,8 @@ $("#arqProjeto").addEventListener("change", (e) => {
   if (arq) abrirProjeto(arq);
 });
 $("#btnLimpar").onclick = () => {
-  if (!confirm("Limpar todos os campos, imagens e testes?\nO cabeçalho (logos e linhas) será mantido.")) return;
-  estadoInicial({ cabecalho: coletar().cabecalho });
+  if (!confirm("Limpar todos os campos, imagens e testes?")) return;
+  estadoInicial();
   salvarRascunho();
   window.scrollTo({ top: 0 });
 };
