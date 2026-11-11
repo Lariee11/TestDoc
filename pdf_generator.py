@@ -396,34 +396,8 @@ def _canvas_modelo(rodape):
             self.drawImage(leitor, x - lw if direita else x, centro - lh / 2, lw, lh, mask="auto")
             return lw
 
-        def _quadro(self):
-            """Moldura azul-marinho com cantos chanfrados e triângulos nos quatro cantos."""
-            m, ch, tri = 15, 15, 17  # afastamento da borda, chanfro e cateto do triângulo
-            x0, y0, x1, y1 = m, m, PAGINA_L - m, PAGINA_A - m
-            self.setStrokeColor(AZUL_TITULO)
-            self.setLineWidth(1.6)
-            self.setLineJoin(1)
-            p = self.beginPath()
-            p.moveTo(x0 + ch, y0)
-            for x, y in ((x1 - ch, y0), (x1, y0 + ch), (x1, y1 - ch), (x1 - ch, y1),
-                         (x0 + ch, y1), (x0, y1 - ch), (x0, y0 + ch)):
-                p.lineTo(x, y)
-            p.close()
-            self.drawPath(p, stroke=1, fill=0)
-            self.setFillColor(AZUL_TITULO)
-            b = 6  # afastamento dos triângulos em relação à borda do papel
-            for cx, cy, sx, sy in ((b, b, 1, 1), (PAGINA_L - b, b, -1, 1),
-                                   (b, PAGINA_A - b, 1, -1), (PAGINA_L - b, PAGINA_A - b, -1, -1)):
-                t = self.beginPath()
-                t.moveTo(cx, cy)
-                t.lineTo(cx + sx * tri, cy)
-                t.lineTo(cx, cy + sy * tri)
-                t.close()
-                self.drawPath(t, stroke=0, fill=1)
-
         def _moldura(self):
             self.saveState()
-            self._quadro()
             self._logo("esq", MARGEM_X, 120, 42)
             ocupado = self._logo("dir", PAGINA_L - MARGEM_X, 46, 46, direita=True)
             x_txt = PAGINA_L - MARGEM_X - (ocupado + 10 if ocupado else 0)
