@@ -1,28 +1,30 @@
-"""Geração do Certificado de Ensaio de Proteção em PDF (ReportLab)."""
+"""Geração do Certificado de Ensaios de Automação em PDF (ReportLab)."""
 
 from __future__ import annotations
 
 import base64
 import io
 import os
+import re
 from datetime import datetime
 from xml.sax.saxutils import escape
 
 from PIL import Image as PILImage
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 from reportlab.platypus import (
     CondPageBreak,
-    Flowable,
     HRFlowable,
     Image,
+    Indenter,
     KeepTogether,
+    PageBreak,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -30,81 +32,64 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LOGO_PATH = os.path.join(BASE_DIR, "static", "logo.png")
-
 # --------------------------------------------------------------------------
-# Paleta
+# Paleta do modelo
 # --------------------------------------------------------------------------
-NAVY = colors.HexColor("#14345a")
-INK = colors.HexColor("#0f172a")
-BLUE = colors.HexColor("#2563eb")
-MUTED = colors.HexColor("#64748b")
-LINE = colors.HexColor("#d8dee8")
-ZEBRA = colors.HexColor("#f5f7fa")
-HEAD_BG = colors.HexColor("#e6ebf2")
-LOG_BG = colors.HexColor("#0b1626")
-LOG_FG = colors.HexColor("#7dd3fc")
-LOG_HEAD = colors.HexColor("#16263d")
+AZUL_TITULO = colors.HexColor("#1f3864")
+AZUL_TABELA = colors.HexColor("#1f4e79")
+AZUL_CLARO = colors.HexColor("#dce6f1")
+AZUL_CAPA = colors.HexColor("#e7ecf7")
+PRETO = colors.black
+CINZA = colors.HexColor("#666666")
 
 STATUS = {
-    "aprovado": {"label": "APROVADO", "cor": colors.HexColor("#10b981"), "icone": "check"},
-    "ressalvas": {
-        "label": "APROVADO COM RESSALVAS",
-        "cor": colors.HexColor("#d97706"),
-        "icone": "alerta",
-    },
-    "reprovado": {"label": "NÃO APROVADO", "cor": colors.HexColor("#dc2626"), "icone": "x"},
-    "nao_realizado": {
-        "label": "TESTES NÃO REALIZADOS",
-        "cor": colors.HexColor("#64748b"),
-        "icone": "traco",
-    },
+    "aprovado": ("Aprovado", colors.HexColor("#2e9e3f")),
+    "ressalvas": ("Aprovado com Ressalvas", colors.HexColor("#c77700")),
+    "reprovado": ("Não Aprovado", colors.HexColor("#c62828")),
+    "nao_realizado": ("Não Realizado", colors.HexColor("#6b7280")),
 }
-STATUS_TESTE_LABEL = {"nao_realizado": "NÃO REALIZADO"}
 
+DOCUMENTO_PADRAO = "Certificado de Ensaios de Automação"
 MAX_LINHAS_LOG = 4000
 MAX_LADO_IMAGEM = 2200  # px
 
+PAGINA_L, PAGINA_A = A4
+MARGEM_X = 54
+MARGEM_TOPO = 92
+MARGEM_BASE = 62
+
 # --------------------------------------------------------------------------
-# Fontes: DejaVu / Arial quando disponíveis (suporte Unicode), senão padrão PDF
+# Fontes: Arial/Liberation/DejaVu quando disponíveis (Unicode), senão padrão PDF
 # --------------------------------------------------------------------------
 _CANDIDATOS = [
-    (
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-    ),
-    (
-        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSansMono.ttf",
-    ),
-    (
-        "C:/Windows/Fonts/arial.ttf",
-        "C:/Windows/Fonts/arialbd.ttf",
-        "C:/Windows/Fonts/consola.ttf",
-    ),
-    (
-        "/System/Library/Fonts/Supplemental/Arial.ttf",
-        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-        "/System/Library/Fonts/Supplemental/Courier New.ttf",
-    ),
+    ("C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/arialbd.ttf",
+     "C:/Windows/Fonts/cour.ttf", "C:/Windows/Fonts/courbd.ttf"),
+    ("/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+     "/System/Library/Fonts/Supplemental/Courier New.ttf", "/System/Library/Fonts/Supplemental/Courier New Bold.ttf"),
+    ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+     "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+     "/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf"),
+    ("/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf",
+     "/usr/share/fonts/liberation-sans/LiberationSans-Bold.ttf",
+     "/usr/share/fonts/liberation-mono/LiberationMono-Regular.ttf",
+     "/usr/share/fonts/liberation-mono/LiberationMono-Bold.ttf"),
+    ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+     "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"),
 ]
 
-FONT, FONT_B, FONT_MONO = "Helvetica", "Helvetica-Bold", "Courier"
+FONT, FONT_B, FONT_MONO, FONT_MONO_B = "Helvetica", "Helvetica-Bold", "Courier", "Courier-Bold"
 UNICODE_OK = False
-for _reg, _bold, _mono in _CANDIDATOS:
-    if all(os.path.isfile(p) for p in (_reg, _bold, _mono)):
+for _arquivos in _CANDIDATOS:
+    if all(os.path.isfile(p) for p in _arquivos):
         try:
-            pdfmetrics.registerFont(TTFont("Doc", _reg))
-            pdfmetrics.registerFont(TTFont("Doc-Bold", _bold))
-            pdfmetrics.registerFont(TTFont("Doc-Mono", _mono))
+            for _nome, _arq in zip(("Doc", "Doc-Bold", "Doc-Mono", "Doc-Mono-Bold"), _arquivos):
+                pdfmetrics.registerFont(TTFont(_nome, _arq))
             pdfmetrics.registerFontFamily("Doc", normal="Doc", bold="Doc-Bold")
-            FONT, FONT_B, FONT_MONO = "Doc", "Doc-Bold", "Doc-Mono"
+            FONT, FONT_B, FONT_MONO, FONT_MONO_B = "Doc", "Doc-Bold", "Doc-Mono", "Doc-Mono-Bold"
             UNICODE_OK = True
             break
-        except Exception:  # fonte corrompida/ilegível: tenta a próxima
+        except Exception:  # fonte ilegível: tenta a próxima
             continue
 
 
@@ -114,7 +99,7 @@ def _limpo(texto) -> str:
     texto = texto.replace("\r\n", "\n").replace("\r", "\n").replace("\t", "    ")
     texto = "".join(ch for ch in texto if ch == "\n" or ord(ch) >= 32)
     if not UNICODE_OK:
-        texto = texto.encode("cp1252", "replace").decode("cp1252")
+        texto = texto.replace("→", "->").encode("cp1252", "replace").decode("cp1252")
     return texto
 
 
@@ -122,122 +107,48 @@ def _xml(texto) -> str:
     return escape(_limpo(texto).strip()).replace("\n", "<br/>")
 
 
+def _linhas(texto) -> list[str]:
+    """Uma entrada por linha não vazia, sem marcadores/numeração digitados."""
+    saida = []
+    for linha in _limpo(texto).split("\n"):
+        linha = re.sub(r"^\s*(?:[-•*–·]|\d+[.)])\s+", "", linha).strip()
+        if linha:
+            saida.append(linha)
+    return saida
+
+
 # --------------------------------------------------------------------------
 # Estilos
 # --------------------------------------------------------------------------
-S_TITULO = ParagraphStyle("titulo", fontName=FONT_B, fontSize=14, leading=17, textColor=INK)
-S_SUB = ParagraphStyle("sub", fontName=FONT_B, fontSize=9, leading=12, textColor=BLUE)
-S_SECAO = ParagraphStyle(
-    "secao", fontName=FONT_B, fontSize=11.5, leading=14, textColor=INK, spaceBefore=14, spaceAfter=7
-)
-S_ROTULO = ParagraphStyle("rotulo", fontName=FONT_B, fontSize=8.3, leading=11, textColor=INK)
-S_VALOR = ParagraphStyle("valor", fontName=FONT, fontSize=8.3, leading=11, textColor=INK)
-S_TH = ParagraphStyle("th", fontName=FONT_B, fontSize=8.3, leading=11, textColor=colors.white)
-S_TESTE = ParagraphStyle("teste", fontName=FONT_B, fontSize=9.5, leading=12, textColor=colors.white)
-S_MINI = ParagraphStyle(
-    "mini", fontName=FONT_B, fontSize=8, leading=10, textColor=MUTED, spaceBefore=8, spaceAfter=4
-)
-S_LOGHEAD = ParagraphStyle("loghead", fontName=FONT_B, fontSize=8, leading=10, textColor=colors.white)
-S_VAZIO = ParagraphStyle(
-    "vazio", fontName=FONT, fontSize=8.3, leading=11, textColor=MUTED, alignment=TA_CENTER
-)
-S_LEGENDA = ParagraphStyle(
-    "legenda", fontName=FONT, fontSize=7.5, leading=10, textColor=MUTED, alignment=TA_CENTER
-)
+def _e(nome, **kw):
+    base = dict(fontName=FONT, fontSize=9, leading=12.5, textColor=PRETO)
+    base.update(kw)
+    return ParagraphStyle(nome, **base)
 
 
-def P(texto, estilo=S_VALOR):
+S_DOC = _e("doc", fontName=FONT_B, fontSize=15, leading=19, textColor=AZUL_TITULO)
+S_SECAO = _e("secao", fontName=FONT_B, fontSize=11, leading=14, textColor=AZUL_TITULO,
+             spaceBefore=16, spaceAfter=9, leftIndent=17, firstLineIndent=-17)
+S_SUBSECAO = _e("subsecao", fontName=FONT_B, fontSize=9, spaceBefore=10, spaceAfter=3, leftIndent=6)
+S_TEXTO = _e("texto", alignment=TA_JUSTIFY)
+S_TEXTO_REC = _e("texto_rec", leftIndent=16)
+S_ROTULO = _e("rotulo", fontName=FONT_B)
+S_CEL = _e("cel", fontSize=8.5, leading=12)
+S_CEL_B = _e("cel_b", fontSize=8.5, leading=12, fontName=FONT_B)
+S_CEL_C = _e("cel_c", fontSize=8.5, leading=12, alignment=TA_CENTER)
+S_TH = _e("th", fontSize=8.5, leading=12, fontName=FONT_B, textColor=colors.white)
+S_TH_C = _e("th_c", fontSize=8.5, leading=12, fontName=FONT_B, textColor=colors.white, alignment=TA_CENTER)
+S_REQ = _e("req", fontSize=8.5, leading=15)
+S_TESTE = _e("teste", fontName=FONT_B, fontSize=10, leading=13, textColor=colors.white)
+S_BLOCO = _e("bloco", fontName=FONT_B, spaceBefore=14, spaceAfter=7)
+S_ITEM = _e("item", leftIndent=34, bulletIndent=18, spaceAfter=2.5)
+S_ITEM_REC = _e("item_rec", leftIndent=44, bulletIndent=28, spaceAfter=2.5)
+S_VAZIO = _e("vazio", textColor=CINZA)
+
+
+def P(texto, estilo=S_CEL):
     conteudo = _xml(texto)
-    return Paragraph(conteudo if conteudo else "—", estilo)
-
-
-# --------------------------------------------------------------------------
-# Selo (desenho vetorial: independe de glifos da fonte)
-# --------------------------------------------------------------------------
-class Selo(Flowable):
-    def __init__(self, status: str, largura: float, altura: float = 20, tamanho: float = 8,
-                 preenchido: bool = False, label: str | None = None):
-        super().__init__()
-        info = STATUS.get(status, STATUS["nao_realizado"])
-        self.cor = info["cor"]
-        self.icone = info["icone"]
-        self.label = label or info["label"]
-        self.width, self.height = largura, altura
-        self.tamanho = tamanho
-        self.preenchido = preenchido
-
-    def wrap(self, *_):
-        return self.width, self.height
-
-    def _icone(self, c, cx, cy, r):
-        c.setLineWidth(max(1.2, r * 0.32))
-        c.setLineCap(1)
-        c.setLineJoin(1)
-        p = c.beginPath()
-        if self.icone == "check":
-            p.moveTo(cx - r, cy)
-            p.lineTo(cx - r * 0.3, cy - r * 0.7)
-            p.lineTo(cx + r, cy + r * 0.75)
-        elif self.icone == "x":
-            p.moveTo(cx - r * 0.75, cy - r * 0.75)
-            p.lineTo(cx + r * 0.75, cy + r * 0.75)
-            p.moveTo(cx - r * 0.75, cy + r * 0.75)
-            p.lineTo(cx + r * 0.75, cy - r * 0.75)
-        elif self.icone == "alerta":
-            p.moveTo(cx, cy + r * 0.9)
-            p.lineTo(cx, cy - r * 0.15)
-            p.moveTo(cx, cy - r * 0.8)
-            p.lineTo(cx, cy - r * 0.82)
-        else:
-            p.moveTo(cx - r * 0.8, cy)
-            p.lineTo(cx + r * 0.8, cy)
-        c.drawPath(p, stroke=1, fill=0)
-
-    def draw(self):
-        c = self.canv
-        w, h = self.width, self.height
-        fonte, tam = FONT_B, self.tamanho
-        linhas = [self.label]
-        r = tam * 0.42
-        folga = r * 2 + 5 + 14
-        # reduz e, se preciso, quebra em duas linhas para caber
-        while pdfmetrics.stringWidth(self.label, fonte, tam) + folga > w and tam > 6.5:
-            tam -= 0.25
-        if pdfmetrics.stringWidth(self.label, fonte, tam) + folga > w and " " in self.label:
-            palavras = self.label.split(" ")
-            melhor = None
-            for i in range(1, len(palavras)):
-                a, b = " ".join(palavras[:i]), " ".join(palavras[i:])
-                maior = max(pdfmetrics.stringWidth(a, fonte, tam), pdfmetrics.stringWidth(b, fonte, tam))
-                if melhor is None or maior < melhor[0]:
-                    melhor = (maior, [a, b])
-            linhas = melhor[1]
-        r = tam * 0.42
-        larg_txt = max(pdfmetrics.stringWidth(l, fonte, tam) for l in linhas)
-        total = r * 2 + 5 + larg_txt
-
-        c.saveState()
-        if self.preenchido:
-            c.setFillColor(self.cor)
-            c.roundRect(0, 0, w, h, 4, stroke=0, fill=1)
-            frente = colors.white
-        else:
-            c.setFillColor(self.cor, alpha=0.10)
-            c.setStrokeColor(self.cor)
-            c.setLineWidth(0.8)
-            c.roundRect(0.4, 0.4, w - 0.8, h - 0.8, 4, stroke=1, fill=1)
-            frente = self.cor
-        c.setFillColor(frente, alpha=1)
-        c.setStrokeColor(frente)
-        x0 = (w - total) / 2
-        self._icone(c, x0 + r, h / 2, r)
-        c.setFont(fonte, tam)
-        entre = tam * 1.15
-        y = h / 2 + (len(linhas) - 1) * entre / 2 - tam * 0.35
-        for linha in linhas:
-            c.drawString(x0 + r * 2 + 5, y, linha)
-            y -= entre
-        c.restoreState()
+    return Paragraph(conteudo or "&nbsp;", estilo)
 
 
 # --------------------------------------------------------------------------
@@ -267,128 +178,105 @@ def _decodificar_imagem(data_url):
     return buf, img.size[0], img.size[1]
 
 
-def _imagem_ajustada(dados, larg_max, alt_max):
-    leitor, w, h = dados
+def _figura(dados, larg_max, alt_max):
+    buf, w, h = dados
     escala = min(larg_max / w, alt_max / h)
-    return Image(leitor, width=w * escala, height=h * escala)
-
-
-def _moldura(conteudo, largura, pad=6):
-    t = Table([[conteudo]], colWidths=[largura])
-    t.setStyle(
-        TableStyle(
-            [
-                ("BOX", (0, 0), (-1, -1), 0.8, LINE),
-                ("BACKGROUND", (0, 0), (-1, -1), colors.white),
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("TOPPADDING", (0, 0), (-1, -1), pad),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), pad),
-                ("LEFTPADDING", (0, 0), (-1, -1), pad),
-                ("RIGHTPADDING", (0, 0), (-1, -1), pad),
-                ("ROUNDEDCORNERS", [5, 5, 5, 5]),
-            ]
-        )
-    )
-    return t
+    img = Image(buf, width=w * escala, height=h * escala)
+    img.hAlign = "CENTER"
+    return img
 
 
 # --------------------------------------------------------------------------
-# Blocos
+# Tabelas
 # --------------------------------------------------------------------------
-def _grade_chave_valor(linhas, larguras, extra=()):
-    t = Table(linhas, colWidths=larguras)
+def _tabela(dados, larguras, grade=True, extra=()):
+    """Tabela com cabeçalho azul e linhas alternadas, como no modelo."""
+    t = Table(dados, colWidths=larguras, repeatRows=1)
     estilo = [
-        ("BOX", (0, 0), (-1, -1), 0.6, LINE),
-        ("INNERGRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#e8ecf2")),
-        ("ROWBACKGROUNDS", (0, 0), (-1, -1), [ZEBRA, colors.white]),
+        ("BACKGROUND", (0, 0), (-1, 0), AZUL_TABELA),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, AZUL_CLARO]),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ("LEFTPADDING", (0, 0), (-1, -1), 7),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
     ]
+    if grade:
+        estilo += [("BOX", (0, 0), (-1, -1), 0.6, PRETO), ("INNERGRID", (0, 0), (-1, -1), 0.5, PRETO)]
     estilo.extend(extra)
     t.setStyle(TableStyle(estilo))
     return t
 
 
 def _bloco_log(nome_rele, conteudo, largura):
-    tam = 6.8
+    tam = 7.6
     larg_char = pdfmetrics.stringWidth("M", FONT_MONO, tam)
-    max_cols = max(20, int((largura - 16) / larg_char))
+    max_cols = max(20, int(largura / larg_char))
 
-    linhas = _limpo(conteudo).strip("\n").split("\n")
     saida = []
-    for linha in linhas:
+    for linha in _limpo(conteudo).strip("\n").split("\n"):
         linha = linha.rstrip()
-        if not linha:
-            saida.append("")
-            continue
         while len(linha) > max_cols:
             saida.append(linha[:max_cols])
             linha = "  " + linha[max_cols:]
         saida.append(linha)
-    cortado = len(saida) > MAX_LINHAS_LOG
-    if cortado:
+    if len(saida) > MAX_LINHAS_LOG:
         saida = saida[:MAX_LINHAS_LOG] + [f"... (log truncado em {MAX_LINHAS_LOG} linhas)"]
-    if not any(s.strip() for s in saida):
-        saida = ["(log não informado)"]
 
-    dados = [[P(nome_rele or "Relé", S_LOGHEAD)]] + [[s] for s in saida]
+    dados = [[_limpo(nome_rele).strip() or "Relé"]] + [[s] for s in saida]
     t = Table(dados, colWidths=[largura], repeatRows=1)
-    ult = len(dados) - 1
     t.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, 0), LOG_HEAD),
-                ("TOPPADDING", (0, 0), (-1, 0), 4),
-                ("BOTTOMPADDING", (0, 0), (-1, 0), 4),
-                ("BACKGROUND", (0, 1), (-1, -1), LOG_BG),
-                ("TEXTCOLOR", (0, 1), (-1, -1), LOG_FG),
+                ("FONTNAME", (0, 0), (-1, 0), FONT_MONO_B),
+                ("FONTSIZE", (0, 0), (-1, 0), 8.5),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 3),
+                ("TOPPADDING", (0, 0), (-1, 0), 0),
                 ("FONTNAME", (0, 1), (-1, -1), FONT_MONO),
                 ("FONTSIZE", (0, 1), (-1, -1), tam),
-                ("LEADING", (0, 1), (-1, -1), tam + 1.6),
-                ("TOPPADDING", (0, 1), (-1, -1), 0.4),
-                ("BOTTOMPADDING", (0, 1), (-1, -1), 0.4),
-                ("TOPPADDING", (0, 1), (-1, 1), 6),
-                ("BOTTOMPADDING", (0, ult), (-1, ult), 7),
-                ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("LEADING", (0, 1), (-1, -1), tam + 2),
+                ("TOPPADDING", (0, 1), (-1, -1), 0.2),
+                ("BOTTOMPADDING", (0, 1), (-1, -1), 0.2),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
             ]
         )
     )
     return t
 
 
-def _bloco_assinatura(titulo, rotulo_nome, pessoa, largura):
-    pessoa = pessoa or {}
-    cols = [largura * 0.46, largura * 0.25, largura * 0.29]
-    dados = [
-        [P(titulo, S_ROTULO), "", ""],
-        [P(rotulo_nome, S_ROTULO), P("Matrícula", S_ROTULO), P("Área de Atuação", S_ROTULO)],
-        [P(pessoa.get("nome")), P(pessoa.get("matricula")), P(pessoa.get("area"))],
-    ]
-    t = Table(dados, colWidths=cols)
-    t.setStyle(
-        TableStyle(
-            [
-                ("SPAN", (0, 0), (-1, 0)),
-                ("BACKGROUND", (0, 0), (-1, 0), HEAD_BG),
-                ("BACKGROUND", (0, 1), (-1, 1), ZEBRA),
-                ("BOX", (0, 0), (-1, -1), 0.6, LINE),
-                ("INNERGRID", (0, 1), (-1, -1), 0.4, LINE),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("TOPPADDING", (0, 0), (-1, -1), 5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-                ("TOPPADDING", (0, 2), (-1, 2), 9),
-                ("BOTTOMPADDING", (0, 2), (-1, 2), 9),
-                ("LEFTPADDING", (0, 0), (-1, -1), 7),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 7),
-            ]
-        )
-    )
-    return t
+_RE_TS = re.compile(r"^(\d{2,4}[-/]\d{2}[-/]\d{2,4}[ T]\d{1,2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?)\s+(.*)$")
+
+
+def _interpretar_scada(texto) -> list[list[str]]:
+    """Cada linha -> [timestamp, tag, mensagem]. Aceita ';', TAB ou colunas alinhadas."""
+    eventos = []
+    bruto = "" if texto is None else str(texto).replace("\r\n", "\n").replace("\r", "\n")
+    for linha in bruto.split("\n"):
+        linha = linha.strip()
+        if not linha:
+            continue
+        if ";" in linha or "\t" in linha:
+            partes = [p.strip() for p in re.split(r"[;\t]", linha)]
+            partes = [p for p in partes if p] if len(partes) > 3 else partes
+        else:
+            m = _RE_TS.match(linha)
+            if m:
+                resto = re.split(r"\s{2,}", m.group(2).strip())
+                if len(resto) >= 2:
+                    partes = [m.group(1), " ".join(resto[:-1]), resto[-1]]
+                else:
+                    tag, _, msg = resto[0].rpartition(" ")
+                    partes = [m.group(1), tag or msg, msg if tag else ""]
+            else:
+                partes = re.split(r"\s{2,}", linha)
+        if len(partes) > 3:
+            partes = [partes[0], " ".join(partes[1:-1]), partes[-1]]
+        partes += [""] * (3 - len(partes))
+        if partes[0].lower() == "timestamp":  # cabeçalho colado junto
+            continue
+        eventos.append(partes)
+    return eventos
 
 
 def _formatar_data(valor) -> str:
@@ -400,10 +288,17 @@ def _formatar_data(valor) -> str:
 
 
 # --------------------------------------------------------------------------
-# Canvas com rodapé "Página X de Y"
+# Canvas: cabeçalho e rodapé em todas as páginas
 # --------------------------------------------------------------------------
-def _canvas_numerado(rodape_esq):
-    class CanvasNumerado(canvas.Canvas):
+def _canvas_modelo(cab, rodape):
+    logo_esq, logo_dir = cab.get("logo_esq"), cab.get("logo_dir")
+    leitores = {}
+    for chave, dados in (("esq", logo_esq), ("dir", logo_dir)):
+        if dados:
+            leitores[chave] = (ImageReader(dados[0]), dados[1], dados[2])
+    linhas = [l for l in (cab.get("linha1"), cab.get("linha2")) if l]
+
+    class CanvasModelo(canvas.Canvas):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
             self._paginas = []
@@ -413,26 +308,40 @@ def _canvas_numerado(rodape_esq):
             self._startPage()
 
         def save(self):
-            total = len(self._paginas)
             for estado in self._paginas:
                 self.__dict__.update(estado)
-                self._rodape(total)
+                self._moldura()
                 super().showPage()
             super().save()
 
-        def _rodape(self, total):
-            larg, _ = A4
+        def _logo(self, chave, x, larg_max, alt_max, direita=False):
+            if chave not in leitores:
+                return 0
+            leitor, w, h = leitores[chave]
+            escala = min(larg_max / w, alt_max / h)
+            lw, lh = w * escala, h * escala
+            centro = PAGINA_A - 56
+            self.drawImage(leitor, x - lw if direita else x, centro - lh / 2, lw, lh, mask="auto")
+            return lw
+
+        def _moldura(self):
             self.saveState()
-            self.setStrokeColor(LINE)
-            self.setLineWidth(0.6)
-            self.line(14 * mm, 13 * mm, larg - 14 * mm, 13 * mm)
-            self.setFont(FONT, 7.5)
-            self.setFillColor(MUTED)
-            self.drawString(14 * mm, 9 * mm, rodape_esq)
-            self.drawRightString(larg - 14 * mm, 9 * mm, f"Página {self._pageNumber} de {total}")
+            self._logo("esq", MARGEM_X, 120, 44)
+            ocupado = self._logo("dir", PAGINA_L - MARGEM_X, 46, 46, direita=True)
+            x_txt = PAGINA_L - MARGEM_X - (ocupado + 10 if ocupado else 0)
+            self.setFillColor(PRETO)
+            self.setFont(FONT, 9.5)
+            y = PAGINA_A - 56 + (len(linhas) - 1) * 6.5 - 3
+            for linha in linhas:
+                self.drawRightString(x_txt, y, linha)
+                y -= 13
+            self.setFont(FONT, 8.5)
+            self.drawRightString(PAGINA_L - MARGEM_X, 50, str(self._pageNumber))
+            if rodape:
+                self.drawString(MARGEM_X, 38, rodape)
             self.restoreState()
 
-    return CanvasNumerado
+    return CanvasModelo
 
 
 # --------------------------------------------------------------------------
@@ -440,214 +349,211 @@ def _canvas_numerado(rodape_esq):
 # --------------------------------------------------------------------------
 def gerar_pdf(dados: dict) -> bytes:
     """Recebe o dicionário enviado pela interface e devolve o PDF em bytes."""
-    geral = dados.get("geral") or {}
-    sub = dados.get("subestacao") or {}
+    cab = dados.get("cabecalho") or {}
+    capa = dados.get("capa") or {}
+    met = dados.get("metodologia") or {}
+    requisitos = [r for r in (dados.get("requisitos") or []) if (r.get("id") or r.get("texto"))]
+    equipamentos = [q for q in (met.get("equipamentos") or []) if (q.get("nome") or q.get("aplicacao"))]
     testes = dados.get("testes") or []
-    val = dados.get("validacao") or {}
+    revisoes = [r for r in (dados.get("revisoes") or []) if any(str(v).strip() for v in r.values())]
 
-    nome_se = _limpo(geral.get("nome_se")).strip()
-    status_geral = geral.get("resultado") if geral.get("resultado") in STATUS else "nao_realizado"
+    documento = _limpo(capa.get("documento")).strip() or DOCUMENTO_PADRAO
+    titulo = _limpo(capa.get("titulo")).strip()
 
     buf = io.BytesIO()
-    margem = 14 * mm
     doc = SimpleDocTemplate(
-        buf,
-        pagesize=A4,
-        leftMargin=margem,
-        rightMargin=margem,
-        topMargin=14 * mm,
-        bottomMargin=18 * mm,
-        title=f"Certificado de Ensaio de Proteção — {nome_se}" if nome_se else "Certificado de Ensaio de Proteção",
-        author="TestDoc",
-        subject="Relatório Técnico de Comissionamento e Testes",
+        buf, pagesize=A4, leftMargin=MARGEM_X, rightMargin=MARGEM_X,
+        topMargin=MARGEM_TOPO, bottomMargin=MARGEM_BASE,
+        title=f"{documento} — {titulo}" if titulo else documento,
+        author=_limpo(capa.get("responsavel")).strip() or "TestDoc",
     )
     L = doc.width
     el = []
 
-    # ---------------- Cabeçalho ----------------
-    logo = Image(LOGO_PATH, width=40, height=40) if os.path.isfile(LOGO_PATH) else Spacer(40, 40)
-    titulo = [
-        Paragraph("CERTIFICADO DE ENSAIO DE PROTEÇÃO", S_TITULO),
-        Paragraph("Relatório Técnico de Comissionamento e Testes", S_SUB),
-    ]
-    larg_selo = 150
-    cab = Table(
-        [[logo, titulo, Selo(status_geral, larg_selo, 28, 10, preenchido=True)]],
-        colWidths=[50, L - 50 - larg_selo, larg_selo],
-    )
-    cab.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                ("TOPPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-            ]
-        )
-    )
-    el += [cab, HRFlowable(width="100%", thickness=1.4, color=INK, spaceBefore=2, spaceAfter=4)]
-
-    # ---------------- 1. Informações gerais ----------------
-    el.append(Paragraph("1. INFORMAÇÕES GERAIS", S_SECAO))
-    c1, c3 = 112, 104
-    c2 = (L - c1 - c3) * 0.56
-    c4 = L - c1 - c2 - c3
-    s_res = ParagraphStyle("res", parent=S_ROTULO, textColor=STATUS[status_geral]["cor"])
-    el.append(
-        _grade_chave_valor(
-            [
-                [P("Nome da SE", S_ROTULO), P(nome_se), P("Data de Emissão", S_ROTULO),
-                 P(_formatar_data(geral.get("data_emissao")))],
-                [P("Norma de Referência", S_ROTULO), P(geral.get("norma")),
-                 P("Resultado dos Testes", S_ROTULO), P(STATUS[status_geral]["label"].title(), s_res)],
-                [P("Equipamentos Simulados", S_ROTULO), P(geral.get("equipamentos")), "", ""],
-                [P("Modelos de Relés Utilizados", S_ROTULO), P(geral.get("reles")), "", ""],
-            ],
-            [c1, c2, c3, c4],
-            extra=[("SPAN", (1, 2), (3, 2)), ("SPAN", (1, 3), (3, 3))],
-        )
-    )
-
-    # ---------------- 2. Informações da subestação ----------------
-    el.append(Paragraph("2. INFORMAÇÕES DA SUBESTAÇÃO", S_SECAO))
-    larg_img = L * 0.47
-    img = _decodificar_imagem(sub.get("diagrama"))
-    if img:
-        quadro = _moldura(_imagem_ajustada(img, larg_img - 14, 245), larg_img)
-    else:
-        quadro = _moldura(P("Diagrama da subestação não informado", S_VAZIO), larg_img, pad=40)
-    larg_info = L - larg_img - 10
-    info = _grade_chave_valor(
+    # ---------------- Capa ----------------
+    el.append(Paragraph(escape(documento), S_DOC))
+    el.append(HRFlowable(width="100%", thickness=1.2, color=PRETO, spaceBefore=2, spaceAfter=8))
+    info = Table(
         [
-            [P("Subestação", S_ROTULO), P(nome_se)],
-            [P("Tensão de Alta", S_ROTULO), P(sub.get("tensao_alta"))],
-            [P("Tensão de Baixa", S_ROTULO), P(sub.get("tensao_baixa"))],
-            [P("Mala de Testes Utilizada", S_ROTULO), P(sub.get("mala"))],
+            [P("Título:", S_ROTULO), P(titulo, S_TEXTO)],
+            [P("Subestação:", S_ROTULO), P(capa.get("subestacao"), S_TEXTO)],
+            [P("Distribuidora:", S_ROTULO), P(capa.get("distribuidora"), S_TEXTO)],
+            [P("Data:", S_ROTULO), P(_formatar_data(capa.get("data")), S_TEXTO)],
+            [P("Responsável Técnico", S_ROTULO), P(capa.get("responsavel"), S_TEXTO)],
+            [P("Revisão:", S_ROTULO), P(capa.get("revisao"), S_TEXTO)],
         ],
-        [larg_info * 0.44, larg_info * 0.56],
+        colWidths=[122, L - 122],
     )
-    lado = Table([[quadro, info]], colWidths=[larg_img + 10, larg_info])
-    lado.setStyle(
+    info.setStyle(
         TableStyle(
             [
+                ("BACKGROUND", (0, 0), (-1, -1), AZUL_CAPA),
+                ("BOX", (0, 0), (-1, -1), 0.6, PRETO),
+                ("LINEBEFORE", (0, 0), (0, -1), 3.5, PRETO),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (0, 0), 10),
-                ("RIGHTPADDING", (1, 0), (1, 0), 0),
-                ("TOPPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+                ("LEFTPADDING", (0, 0), (-1, -1), 7),
             ]
         )
     )
-    el.append(lado)
+    el.append(info)
 
-    # ---------------- 3. Condições de teste e resultados ----------------
-    el.append(CondPageBreak(120))
-    el.append(Paragraph("3. CONDIÇÕES DE TESTE E RESULTADOS", S_SECAO))
-    if not testes:
-        el.append(_moldura(P("Nenhum teste cadastrado.", S_VAZIO), L, pad=14))
+    # ---------------- 1. Diagrama unifilar ----------------
+    img = _decodificar_imagem(dados.get("diagrama"))
+    bloco = [Paragraph("1.&nbsp;&nbsp;Diagrama Unifilar", S_SECAO)]
+    bloco.append(_figura(img, L * 0.9, 300) if img else P("Diagrama não informado.", S_VAZIO))
+    el.append(KeepTogether(bloco))
 
-    larg_selo_t = 108
-    for i, teste in enumerate(testes, start=1):
-        status = teste.get("selo") if teste.get("selo") in STATUS else "nao_realizado"
-        ident = _limpo(teste.get("id")).strip() or f"Teste {i}"
+    # ---------------- 2. Requisitos funcionais ----------------
+    el.append(CondPageBreak(110))
+    el.append(Paragraph("2.&nbsp;&nbsp;Requisitos Funcionais", S_SECAO))
+    if requisitos:
+        linhas = [[P("N°", S_TH_C), P("Requisito", S_TH_C)]]
+        linhas += [[P(r.get("id"), S_CEL_B), P(r.get("texto"), S_REQ)] for r in requisitos]
+        el.append(_tabela(linhas, [46, L - 46]))
+    else:
+        el.append(P("Nenhum requisito cadastrado.", S_VAZIO))
 
-        faixa = Table([[Paragraph(f"3.{i} &nbsp;·&nbsp; {escape(ident)}", S_TESTE)]], colWidths=[L])
+    # ---------------- 3. Metodologia ----------------
+    el.append(CondPageBreak(130))
+    el.append(Paragraph("3.&nbsp;&nbsp;Metodologia", S_SECAO))
+
+    el.append(Paragraph("3.1. Objetivo e Escopo", S_SUBSECAO))
+    el.append(P(met.get("objetivo") or "—", S_TEXTO_REC))
+
+    topo = _decodificar_imagem(met.get("topologia"))
+    cab_32 = [Paragraph("3.2. Topologia e Equipamentos", S_SUBSECAO)]
+    if topo:
+        cab_32 += [Spacer(1, 4), _figura(topo, L, 250)]
+    el.append(KeepTogether(cab_32))
+    if equipamentos:
+        linhas = [[P("Equipamento", S_TH), P("Aplicação", S_TH)]]
+        linhas += [[P(q.get("nome")), P(q.get("aplicacao"))] for q in equipamentos]
+        el += [Spacer(1, 8), _tabela(linhas, [L * 0.42, L * 0.58], extra=[("VALIGN", (0, 1), (-1, -1), "TOP")])]
+
+    for numero, nome, chave in (
+        ("3.3", "Comunicação e Sincronismo de Tempo", "comunicacao"),
+        ("3.4", "Execução dos Ensaios", "execucao"),
+    ):
+        itens = _linhas(met.get(chave))
+        corpo = [Paragraph(f"{numero}. {nome}", S_SUBSECAO)]
+        corpo += [Paragraph(escape(i), S_ITEM, bulletText="•") for i in itens] or [P("—", S_TEXTO_REC)]
+        el += [Spacer(1, 8), KeepTogether(corpo)]
+
+    # ---------------- 4. Plano de testes ----------------
+    el.append(CondPageBreak(130))
+    el.append(Paragraph("4.&nbsp;&nbsp;Plano de Testes", S_SECAO))
+    idents = []
+    if testes:
+        linhas = [[P("ID", S_TH_C), P("Cenário", S_TH_C), P("Resultado Esperado", S_TH_C), P("Status", S_TH_C)]]
+        for i, t in enumerate(testes, start=1):
+            ident = _limpo(t.get("id")).strip() or f"T-{i}"
+            nome = _limpo(t.get("titulo")).strip()
+            idents.append((ident, f"{ident}: {nome}" if nome else ident))
+            rotulo, cor = STATUS.get(t.get("status"), STATUS["nao_realizado"])
+            s_status = ParagraphStyle(f"st{i}", parent=S_CEL_B, textColor=cor, alignment=TA_CENTER)
+            linhas.append([P(ident, S_CEL_B), P(idents[-1][1]), P(t.get("resultado_plano")), P(rotulo, s_status)])
+        el.append(
+            _tabela(linhas, [36, 134, L - 36 - 134 - 78, 78],
+                    extra=[("TOPPADDING", (0, 1), (-1, -1), 6), ("BOTTOMPADDING", (0, 1), (-1, -1), 6)])
+        )
+    else:
+        el.append(P("Nenhum teste cadastrado.", S_VAZIO))
+
+    # ---------------- 5. Detalhamento dos testes ----------------
+    if testes:
+        el.append(PageBreak())
+        el.append(Paragraph("5.&nbsp;&nbsp;Detalhamento dos Testes", S_SECAO))
+    rec = 22  # recuo do corpo de cada teste
+    Lr = L - rec
+    for i, t in enumerate(testes):
+        if i:
+            el.append(PageBreak())
+        faixa = Table([[Paragraph(escape(idents[i][1]), S_TESTE)]], colWidths=[L])
         faixa.setStyle(
             TableStyle(
                 [
-                    ("BACKGROUND", (0, 0), (-1, -1), NAVY),
-                    ("TOPPADDING", (0, 0), (-1, -1), 6),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 9),
+                    ("BACKGROUND", (0, 0), (-1, -1), AZUL_TABELA),
+                    ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 3),
                 ]
             )
         )
-        larg_txt = (L - larg_selo_t) / 2
-        resumo = Table(
-            [
-                [P("Condição Simulada", S_ROTULO), P("Resultado", S_ROTULO), P("Selo de Aprovação", S_ROTULO)],
-                [
-                    P(teste.get("condicao")),
-                    P(teste.get("resultado")),
-                    Selo(status, larg_selo_t - 14, 24, 7.6, label=STATUS_TESTE_LABEL.get(status)),
-                ],
-            ],
-            colWidths=[larg_txt, larg_txt, larg_selo_t],
-        )
-        resumo.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), HEAD_BG),
-                    ("BOX", (0, 0), (-1, -1), 0.6, LINE),
-                    ("INNERGRID", (0, 0), (-1, -1), 0.4, LINE),
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("ALIGN", (2, 0), (2, -1), "CENTER"),
-                    ("TOPPADDING", (0, 0), (-1, -1), 5),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-                    ("TOPPADDING", (0, 1), (-1, 1), 7),
-                    ("BOTTOMPADDING", (0, 1), (-1, 1), 7),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 7),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 7),
-                ]
+        el += [Spacer(1, 6), faixa, Spacer(1, 10), Indenter(left=rec)]
+
+        el.append(Paragraph(f"<b>Pré-Condição:</b> {_xml(t.get('pre_condicao'))}", S_TEXTO))
+        pre = _decodificar_imagem(t.get("pre_img"))
+        if pre:
+            el += [Spacer(1, 8), _figura(pre, Lr * 0.82, 235)]
+
+        passos = _linhas(t.get("procedimento"))
+        if passos:
+            corpo = [Paragraph("Procedimento:", S_BLOCO)]
+            corpo += [Paragraph(escape(p), S_ITEM_REC, bulletText=f"{n}.") for n, p in enumerate(passos, 1)]
+            el.append(KeepTogether(corpo))
+
+        esp_img = _decodificar_imagem(t.get("esperado_img"))
+        esperados = _linhas(t.get("esperados"))
+        if esp_img or esperados:
+            corpo = [Paragraph("Resultados Esperados:", S_BLOCO)]
+            if esp_img:
+                corpo += [_figura(esp_img, Lr * 0.82, 235), Spacer(1, 8)]
+            el.append(KeepTogether(corpo))
+            el += [Paragraph(escape(x), S_ITEM, bulletText="•") for x in esperados]
+
+        el.append(
+            KeepTogether(
+                [Paragraph("Comentários:", S_BLOCO),
+                 P(t.get("comentarios") or "Nenhum comentário adicional.", S_TEXTO)]
             )
         )
-        if i > 1:
-            el.append(Spacer(1, 14))
-        el.append(KeepTogether([faixa, resumo]))
 
-        logs = [l for l in (teste.get("logs") or []) if (l.get("rele") or l.get("conteudo"))]
-        el.append(CondPageBreak(70))
-        el.append(Paragraph("LOG DE EVENTOS DOS RELÉS", S_MINI))
-        if not logs:
-            el.append(_moldura(P("Nenhum log de relé anexado a este teste.", S_VAZIO), L, pad=10))
-        for j, log in enumerate(logs):
-            if j:
-                el.append(Spacer(1, 6))
-            el.append(_bloco_log(_limpo(log.get("rele")).strip(), log.get("conteudo"), L))
+        logs = [l for l in (t.get("logs") or []) if (l.get("rele") or (l.get("conteudo") or "").strip())]
+        if logs:
+            el += [CondPageBreak(90), Paragraph("Logs dos relés (SER)", S_BLOCO)]
+            for j, log in enumerate(logs):
+                if j:
+                    el.append(Spacer(1, 12))
+                el.append(_bloco_log(log.get("rele"), log.get("conteudo"), Lr))
 
-        img_t = _decodificar_imagem(teste.get("imagem"))
-        if img_t:
-            fig = _imagem_ajustada(img_t, L * 0.62, 300)
-            el.append(
-                KeepTogether(
-                    [
-                        Paragraph("DIAGRAMA — ESTADO DOS EQUIPAMENTOS", S_MINI),
-                        _moldura(fig, L),
-                        Spacer(1, 3),
-                        Paragraph(f"Estado dos equipamentos durante o teste {escape(ident)}", S_LEGENDA),
-                    ]
-                )
+        eventos = _interpretar_scada(t.get("scada"))
+        if eventos:
+            linhas = [[P("Timestamp", S_TH_C), P("Tag Name", S_TH), P("Message", S_TH)]]
+            linhas += [[P(a), P(b), P(c)] for a, b, c in eventos]
+            tab = _tabela(
+                linhas, [128, Lr - 8 - 128 - 96, 96], grade=False,
+                extra=[("TOPPADDING", (0, 0), (-1, -1), 1.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 2)],
             )
+            el += [CondPageBreak(90), Paragraph("Logs SCADA", S_BLOCO), Indenter(left=6), tab, Indenter(left=-6)]
 
-    # ---------------- 4. Validação ----------------
-    meia = (L - 8) / 2
-    par = Table(
-        [
-            [
-                _bloco_assinatura("EXECUÇÃO DOS ENSAIOS", "Responsável", val.get("execucao"), meia),
-                _bloco_assinatura("APROVAÇÃO E LIBERAÇÃO", "Aprovador", val.get("aprovacao"), meia),
-            ]
-        ],
-        colWidths=[meia + 8, meia],
-    )
-    par.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (0, 0), 8),
-                ("RIGHTPADDING", (1, 0), (1, 0), 0),
-                ("TOPPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-            ]
-        )
-    )
+        el.append(Indenter(left=-rec))
+
+    # ---------------- 6. Controle de revisões ----------------
+    if testes:
+        el.append(PageBreak())
+    linhas = [[P("Revisão", S_TH_C), P("Descrição", S_TH_C), P("Responsável", S_TH_C)]]
+    linhas += [[P(r.get("rev"), S_CEL_C), P(r.get("descricao"), S_CEL_C), P(r.get("responsavel"), S_CEL_C)]
+               for r in revisoes] or [[P("—", S_CEL_C)] * 3]
     el.append(
-        KeepTogether([Paragraph("4. REGISTRO DE VALIDAÇÃO E APROVAÇÃO TÉCNICA", S_SECAO), par])
+        KeepTogether(
+            [
+                Paragraph("6.&nbsp;&nbsp;Controle de Revisões", S_SECAO),
+                _tabela(linhas, [L * 0.14, L * 0.54, L * 0.32], grade=False,
+                        extra=[("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white]),
+                               ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#9aa7b8")),
+                               ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#9aa7b8")),
+                               ("TOPPADDING", (0, 0), (-1, -1), 7), ("BOTTOMPADDING", (0, 0), (-1, -1), 7)]),
+            ]
+        )
     )
 
-    rodape = "Certificado de Ensaio de Proteção" + (f" — {nome_se}" if nome_se else "")
-    doc.build(el, canvasmaker=_canvas_numerado(rodape))
+    cabecalho = {
+        "linha1": _limpo(cab.get("linha1")).strip(),
+        "linha2": _limpo(cab.get("linha2")).strip(),
+        "logo_esq": _decodificar_imagem(cab.get("logo_esq")),
+        "logo_dir": _decodificar_imagem(cab.get("logo_dir")),
+    }
+    doc.build(el, canvasmaker=_canvas_modelo(cabecalho, titulo))
     return buf.getvalue()

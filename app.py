@@ -26,10 +26,10 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 MAX_BODY = 80 * 1024 * 1024  # 80 MB (imagens chegam em base64)
 
 
-def _nome_arquivo(nome_se: str) -> str:
-    base = unicodedata.normalize("NFKD", nome_se or "").encode("ascii", "ignore").decode()
+def _nome_arquivo(titulo: str) -> str:
+    base = unicodedata.normalize("NFKD", titulo or "").encode("ascii", "ignore").decode()
     base = re.sub(r"[^A-Za-z0-9]+", "_", base).strip("_")
-    return f"Certificado_Protecao_{base}.pdf" if base else "Certificado_Protecao.pdf"
+    return f"Certificado_Ensaios_{base[:80]}.pdf" if base else "Certificado_Ensaios.pdf"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -102,7 +102,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.INTERNAL_SERVER_ERROR,
                        {"erro": "Falha interna ao gerar o PDF. Consulte o terminal do servidor."})
             return
-        nome = _nome_arquivo(str((dados.get("geral") or {}).get("nome_se", "")))
+        capa = dados.get("capa")
+        nome = _nome_arquivo(str(capa.get("titulo", "")) if isinstance(capa, dict) else "")
         self._enviar(HTTPStatus.OK, pdf, "application/pdf",
                      {"Content-Disposition": f'attachment; filename="{nome}"'})
 
@@ -111,7 +112,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="TestDoc — gerador de certificados de ensaio de proteção")
+    parser = argparse.ArgumentParser(description="TestDoc — gerador de certificados de ensaios de automação")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
